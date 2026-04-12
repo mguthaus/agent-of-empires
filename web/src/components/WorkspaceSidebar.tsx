@@ -1,7 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import type { Workspace, SessionStatus } from "../lib/types";
-
-import { STATUS_TEXT_CLASS, isSessionActive } from "../lib/session";
+import type { Workspace, RepoGroup, SessionStatus } from "../lib/types";
+import { STATUS_DOT_CLASS, STATUS_TEXT_CLASS, isSessionActive } from "../lib/session";
 
 const SIDEBAR_WIDTH_KEY = "aoe-sidebar-width";
 const DEFAULT_WIDTH = 280;
@@ -9,10 +8,12 @@ const MIN_WIDTH = 200;
 const MAX_WIDTH = 480;
 
 interface Props {
-  workspaces: Workspace[];
+  groups: RepoGroup[];
+  standalone: Workspace[];
   activeId: string | null;
   onToggle: () => void;
   onSelect: (workspaceId: string) => void;
+  onToggleRepo: (repoId: string) => void;
   onNew: () => void;
   onSettings: () => void;
 }
@@ -54,10 +55,12 @@ const SessionRow = memo(function SessionRow({
   workspace,
   isActive,
   onClick,
+  indented,
 }: {
   workspace: Workspace;
   isActive: boolean;
   onClick: () => void;
+  indented?: boolean;
 }) {
   const sessionStatus = bestSessionStatus(workspace);
   const textClass = STATUS_TEXT_CLASS[sessionStatus] ?? "text-status-idle";
@@ -68,7 +71,9 @@ const SessionRow = memo(function SessionRow({
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-3 py-2 cursor-pointer transition-colors duration-75 ${
+      className={`w-full text-left py-2 cursor-pointer transition-colors duration-75 ${
+        indented ? "pl-6 pr-3" : "px-3"
+      } ${
         isActive
           ? "bg-surface-850 border-l-2 border-brand-600"
           : "border-l-2 border-transparent hover:bg-surface-800/50"
@@ -85,29 +90,73 @@ const SessionRow = memo(function SessionRow({
         <span className={`text-[13px] truncate flex-1 ${isActive ? "text-text-primary" : "text-text-secondary"}`} title={label}>
           {label}
         </span>
-      </div>
-      <div className="ml-[18px] mt-0.5 flex items-center gap-1.5">
-        <span className="font-mono text-[11px] text-text-dim truncate">
+        <span className="font-mono text-[11px] text-text-dim shrink-0">
           {workspace.primaryAgent}
         </span>
-        {workspace.branch && workspace.sessions[0]?.title !== workspace.branch && (
-          <>
-            <span className="text-text-dim/40 text-[11px]">&middot;</span>
-            <span className="font-mono text-[11px] text-text-dim truncate">
-              {workspace.sessions.length} session{workspace.sessions.length !== 1 ? "s" : ""}
-            </span>
-          </>
-        )}
       </div>
     </button>
   );
 });
 
+const RepoGroupHeader = memo(function RepoGroupHeader({
+  group,
+  hasActiveChild,
+  onClick,
+}: {
+  group: RepoGroup;
+  hasActiveChild: boolean;
+  onClick: () => void;
+}) {
+  const dotClass =
+    STATUS_DOT_CLASS[
+      group.status === "active" ? "Running" : "Idle"
+    ] ?? "bg-status-idle";
+
+  return (
+    <button
+      onClick={onClick}
+      aria-expanded={!group.collapsed}
+      className={`w-full text-left flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors duration-75 text-text-secondary hover:bg-surface-800/50 ${
+        hasActiveChild ? "border-l-2 border-brand-600" : ""
+      }`}
+    >
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 10 10"
+        fill="currentColor"
+        className={`shrink-0 text-text-dim transition-transform duration-75 ${
+          group.collapsed ? "-rotate-90" : ""
+        }`}
+      >
+        <path d="M2 3 L5 6.5 L8 3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <span className="text-[13px] font-medium truncate flex-1" title={group.repoPath}>
+        {group.displayName}
+      </span>
+      <span
+        className={`w-2 h-2 rounded-full shrink-0 ${dotClass}`}
+      />
+    </button>
+  );
+});
+
+function workspaceMatchesFilter(ws: Workspace, q: string): boolean {
+  return (
+    ws.displayName.toLowerCase().includes(q) ||
+    ws.projectPath.toLowerCase().includes(q) ||
+    ws.agents.some((a) => a.toLowerCase().includes(q)) ||
+    ws.sessions.some((s) => s.title.toLowerCase().includes(q))
+  );
+}
+
 export function WorkspaceSidebar({
-  workspaces,
+  groups,
+  standalone,
   activeId,
   onToggle,
   onSelect,
+  onToggleRepo,
   onNew,
   onSettings,
 }: Props) {
@@ -117,17 +166,25 @@ export function WorkspaceSidebar({
   const filterRef = useRef<HTMLInputElement>(null);
   const dragging = useRef(false);
 
-  const filtered = filterQuery.trim()
-    ? workspaces.filter((ws) => {
-        const q = filterQuery.toLowerCase();
-        return (
-          ws.displayName.toLowerCase().includes(q) ||
-          ws.projectPath.toLowerCase().includes(q) ||
-          ws.agents.some((a) => a.toLowerCase().includes(q)) ||
-          ws.sessions.some((s) => s.title.toLowerCase().includes(q))
-        );
-      })
-    : workspaces;
+  const q = filterQuery.trim().toLowerCase();
+
+  const filteredGroups = q
+    ? groups
+        .map((g) => ({
+          ...g,
+          workspaces: g.workspaces.filter((ws) =>
+            workspaceMatchesFilter(ws, q) ||
+            g.displayName.toLowerCase().includes(q),
+          ),
+        }))
+        .filter((g) => g.workspaces.length > 0)
+    : groups;
+
+  const filteredStandalone = q
+    ? standalone.filter((ws) => workspaceMatchesFilter(ws, q))
+    : standalone;
+
+  const hasResults = filteredGroups.length > 0 || filteredStandalone.length > 0;
 
   const toggleFilter = () => {
     setFilterOpen((o) => {
@@ -254,7 +311,33 @@ export function WorkspaceSidebar({
         )}
 
         <div className="flex-1 overflow-y-auto">
-          {filtered.map((ws) => (
+          {filteredGroups.map((group) => {
+            const showExpanded = q ? true : !group.collapsed;
+            const hasActiveChild = group.workspaces.some(
+              (ws) => ws.id === activeId,
+            );
+            return (
+              <div key={group.id}>
+                <RepoGroupHeader
+                  group={{ ...group, collapsed: !showExpanded }}
+                  hasActiveChild={!showExpanded && hasActiveChild}
+                  onClick={() => !q && onToggleRepo(group.id)}
+                />
+                {showExpanded &&
+                  group.workspaces.map((ws) => (
+                    <SessionRow
+                      key={ws.id}
+                      workspace={ws}
+                      isActive={ws.id === activeId}
+                      onClick={() => onSelect(ws.id)}
+                      indented
+                    />
+                  ))}
+              </div>
+            );
+          })}
+
+          {filteredStandalone.map((ws) => (
             <SessionRow
               key={ws.id}
               workspace={ws}
@@ -263,10 +346,10 @@ export function WorkspaceSidebar({
             />
           ))}
 
-          {filtered.length === 0 && filterQuery && (
+          {!hasResults && filterQuery && (
             <div className="px-4 py-8 text-center">
               <p className="text-sm text-text-muted">
-                No matches for "{filterQuery}"
+                No matches for &ldquo;{filterQuery}&rdquo;
               </p>
             </div>
           )}
