@@ -1033,10 +1033,69 @@ impl HomeView {
                     }
                 }
             }
+            KeyCode::Char('w') => {
+                self.jump_to_next_waiting(false);
+            }
+            KeyCode::Char('W') => {
+                self.jump_to_next_waiting(true);
+            }
             _ => {}
         }
 
         None
+    }
+
+    fn jump_to_next_waiting(&mut self, any_project: bool) {
+        let current_project = if !any_project {
+            self.selected_session
+                .as_ref()
+                .and_then(|id| self.get_instance(id))
+                .map(|inst| {
+                    inst.worktree_info
+                        .as_ref()
+                        .map(|wt| wt.main_repo_path.clone())
+                        .unwrap_or_else(|| inst.project_path.clone())
+                })
+        } else {
+            None
+        };
+
+        let len = self.flat_items.len();
+        if len == 0 {
+            return;
+        }
+
+        let start = (self.cursor + 1) % len;
+        for i in 0..len - 1 {
+            let idx = (start + i) % len;
+            if let Some(Item::Session { id, .. }) = self.flat_items.get(idx) {
+                let id = id.clone();
+                if let Some(inst) = self.get_instance(&id) {
+                    if inst.status == Status::Waiting {
+                        if let Some(ref project) = current_project {
+                            let inst_project = inst
+                                .worktree_info
+                                .as_ref()
+                                .map(|wt| wt.main_repo_path.clone())
+                                .unwrap_or_else(|| inst.project_path.clone());
+                            if &inst_project != project {
+                                continue;
+                            }
+                        }
+                        self.cursor = idx;
+                        self.update_selected();
+                        return;
+                    }
+                }
+            }
+        }
+
+        let msg = if any_project {
+            "No sessions are currently waiting for input."
+        } else {
+            "No sessions in this project are waiting for input. Press W to search all projects."
+        };
+        self.info_dialog = Some(InfoDialog::new("No Waiting Sessions", msg));
     }
 
     pub(super) fn move_cursor(&mut self, delta: i32) {
