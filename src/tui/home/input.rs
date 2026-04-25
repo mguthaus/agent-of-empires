@@ -7,7 +7,7 @@ use tui_input::Input;
 
 use super::{HomeView, TerminalMode, ViewMode};
 use crate::session::config::{load_config, save_config, GroupByMode, SortOrder};
-use crate::session::{list_profiles, repo_config, resolve_config, Instance, Item, Status};
+use crate::session::{list_profiles, repo_config, resolve_config, Item, Status};
 use crate::tui::app::Action;
 #[cfg(feature = "serve")]
 use crate::tui::dialogs::ServeAction;
@@ -1034,10 +1034,7 @@ impl HomeView {
                 }
             }
             KeyCode::Char('w') => {
-                self.jump_to_next_waiting(false);
-            }
-            KeyCode::Char('W') => {
-                self.jump_to_next_waiting(true);
+                self.jump_to_next_waiting();
             }
             _ => {}
         }
@@ -1045,20 +1042,11 @@ impl HomeView {
         None
     }
 
-    fn jump_to_next_waiting(&mut self, any_project: bool) {
+    fn jump_to_next_waiting(&mut self) {
         let len = self.flat_items.len();
         if len == 0 {
             return;
         }
-
-        let current_project = if !any_project {
-            self.selected_session
-                .as_ref()
-                .and_then(|id| self.get_instance(id))
-                .map(project_root_path)
-        } else {
-            None
-        };
 
         // Pass 1: forward-walk from cursor+1, wrapping, for the next Waiting session.
         let start = (self.cursor + 1) % len;
@@ -1069,23 +1057,17 @@ impl HomeView {
                 _ => continue,
             };
             if let Some(inst) = self.get_instance(&id) {
-                if inst.status != Status::Waiting {
-                    continue;
+                if inst.status == Status::Waiting {
+                    self.cursor = idx;
+                    self.update_selected();
+                    return;
                 }
-                if let Some(ref project) = current_project {
-                    if project_root_path(inst) != *project {
-                        continue;
-                    }
-                }
-                self.cursor = idx;
-                self.update_selected();
-                return;
             }
         }
 
-        // Pass 2: fall back to the most-recently-accessed Idle session in scope,
-        // skipping the cursor. Sessions never attached (last_accessed_at == None)
-        // rank last but remain eligible.
+        // Pass 2: fall back to the most-recently-accessed Idle session, skipping
+        // the cursor. Sessions never attached (last_accessed_at == None) rank
+        // last but remain eligible.
         let mut best: Option<(usize, Option<chrono::DateTime<chrono::Utc>>)> = None;
         for idx in 0..len {
             if idx == self.cursor {
@@ -1100,11 +1082,6 @@ impl HomeView {
             };
             if inst.status != Status::Idle {
                 continue;
-            }
-            if let Some(ref project) = current_project {
-                if project_root_path(inst) != *project {
-                    continue;
-                }
             }
             let ts = inst.last_accessed_at;
             let beats = match best {
@@ -1126,12 +1103,10 @@ impl HomeView {
             return;
         }
 
-        let msg = if any_project {
-            "No sessions are currently waiting or idle."
-        } else {
-            "No sessions in this project are waiting or idle. Press W to search all projects."
-        };
-        self.info_dialog = Some(InfoDialog::new("No Available Sessions", msg));
+        self.info_dialog = Some(InfoDialog::new(
+            "No Available Sessions",
+            "No sessions are currently waiting or idle.",
+        ));
     }
 
     pub(super) fn move_cursor(&mut self, delta: i32) {
@@ -1543,11 +1518,4 @@ impl HomeView {
             _ => Some(key),
         }
     }
-}
-
-fn project_root_path(inst: &Instance) -> String {
-    inst.worktree_info
-        .as_ref()
-        .map(|wt| wt.main_repo_path.clone())
-        .unwrap_or_else(|| inst.project_path.clone())
 }
