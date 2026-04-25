@@ -27,7 +27,7 @@ fn shortcuts(strict: bool) -> Vec<(&'static str, Vec<(&'static str, &'static str
                     ("l/→", "Expand group"),
                     ("Home/End", "Go to top / bottom"),
                     ("PgUp/Dn", "Move 10 items up / down"),
-                    ("w/W", "Next waiting (project/global)"),
+                    ("w/W", "Next waiting/idle (project/global)"),
                 ],
             ),
             (
@@ -79,7 +79,7 @@ fn shortcuts(strict: bool) -> Vec<(&'static str, Vec<(&'static str, &'static str
                     ("l/→", "Expand group"),
                     ("Home/End", "Go to top / bottom"),
                     ("PgUp/Dn", "Move 10 items up / down"),
-                    ("w/W", "Next waiting (project/global)"),
+                    ("w/W", "Next waiting/idle (project/global)"),
                 ],
             ),
             (
